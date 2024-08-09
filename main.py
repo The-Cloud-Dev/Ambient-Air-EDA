@@ -50,15 +50,6 @@ GOOD_CO_MAX, MODERATE_CO_MAX, SEVERE_CO_MAX = 2, 5, 9
 # Streamlit app title
 st.title('Air Quality Data Viewer')
 
-# Mapping for state names to abbreviations
-abbreviation_mapping = {
-    name: abbr
-    for abbr, name in state_expanded_forms.items()
-}
-selected_name = st.selectbox("Select a State or UT",
-                             list(state_expanded_forms.values()))
-selected_abbreviation = abbreviation_mapping[selected_name]
-
 # Load data
 file_path = f"Datasets/{selected_abbreviation}.csv"
 df = pd.read_csv(file_path)
