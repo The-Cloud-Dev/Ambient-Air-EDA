@@ -47,13 +47,6 @@ state_expanded_forms = {
 
 GOOD_CO_MAX, MODERATE_CO_MAX, SEVERE_CO_MAX = 2, 5, 9
 
-co_data = {}
-
-data_dir = "Datasets/"
-
-with open(f'{data_dir}/states_india.geojson') as f:
-    geojson_data = json.load(f)
-
 # Streamlit app title
 st.title('Air Quality Data Viewer')
 
