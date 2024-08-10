@@ -3,7 +3,7 @@ pandas
 plotly
 statsmodels
 openai
-numpy==0.55.2
+numpy
 base64
 matplotlib
 io
