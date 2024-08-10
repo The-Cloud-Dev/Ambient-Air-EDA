@@ -1,14 +1,24 @@
 import streamlit as st
 import pandas as pd
+import base64
 import plotly.graph_objects as go
 from statsmodels.tsa.arima.model import ARIMA
 import plotly.express as px
+import matplotlib.pyplot as plt
+from io import BytesIO
+from datetime import datetime
+import mailtrap as mt
+from mailtrap import Mail, Address, Attachment, Disposition, MailtrapClient
 from openai import OpenAI
+import requests
 import numpy as np
+import re
 import json
 import os
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+AQICN_API_KEY = os.getenv("AQICN_API_KEY")
+MT_API_KEY = os.getenv("MT_API_KEY")
 client = OpenAI(api_key=OPENAI_API_KEY)
 
 state_expanded_forms = {
@@ -47,10 +57,8 @@ state_expanded_forms = {
 
 GOOD_CO_MAX, MODERATE_CO_MAX, SEVERE_CO_MAX = 2, 5, 9
 
-# Streamlit app title
 st.title('Air Quality Data Viewer')
 
-# Mapping for state names to abbreviations
 abbreviation_mapping = {
     name: abbr
     for abbr, name in state_expanded_forms.items()
@@ -59,19 +67,18 @@ selected_name = st.selectbox("Select a State or UT",
                              list(state_expanded_forms.values()))
 selected_abbreviation = abbreviation_mapping[selected_name]
 
-# Load data
 file_path = f"Datasets/{selected_abbreviation}.csv"
 df = pd.read_csv(file_path)
 df['From Date'] = pd.to_datetime(df['From Date'], format='%Y-%m-%d')
 
-# Select year
+
 selected_year = st.slider('Select a year to view the Data:', 2010, 2023, 2010)
 year_df = df[df['From Date'].dt.year == selected_year]
 
 st.write(f'## Data for {selected_year}')
 
 st.subheader("Carbon Monoxide Concentrations Over Time")
-# Carbon Monoxide Chart
+
 if 'CO (mg/m3)' in year_df.columns and not year_df['CO (mg/m3)'].isna().all():
     max_co_value = year_df['CO (mg/m3)'].max()
     fig = go.Figure()
@@ -126,7 +133,6 @@ if 'CO (mg/m3)' in year_df.columns and not year_df['CO (mg/m3)'].isna().all():
         xaxis_title='Date',
     )
 
-    # Add legend manually
     for color, label in zip(['green', 'yellow', 'red'], [
             'Good (0 - 1 mg/m3)', 'Moderate (1 - 5 mg/m3)',
             'Severe (5 - 9 mg/m3)'
@@ -171,17 +177,11 @@ if not year_df.empty:
 else:
     st.write('No data available for the selected year.')
 
-# PM2.5 and PM10 Concentrations
 st.subheader("PM2.5 and PM10 Concentrations over Time")
 
-# Check if year_df is not empty and contains valid data
 if not year_df.empty and 'PM2.5 (ug/m3)' in year_df.columns and 'PM10 (ug/m3)' in year_df.columns:
-    # Drop rows with missing values in relevant columns
     pm_df = year_df[['From Date', 'PM2.5 (ug/m3)', 'PM10 (ug/m3)']].dropna()
-
-    # Check if there is any data left after dropping NaNs
     if not pm_df.empty:
-        # Create and display the line graph
         fig = px.line(pm_df,
                       x='From Date',
                       y=['PM2.5 (ug/m3)', 'PM10 (ug/m3)'],
@@ -200,9 +200,7 @@ else:
 
 st.subheader("Average Pollutant Levels Across the Region")
 
-# Check if year_df is not empty
 if not year_df.empty:
-    # Define the pollutant columns to consider
     pollutant_columns = {
         'PM2.5 (ug/m3)': 'PM2.5',
         'PM10 (ug/m3)': 'PM10',
@@ -212,15 +210,12 @@ if not year_df.empty:
         'Ozone (ug/m3)': 'Ozone'
     }
 
-    # Filter out only the columns present in the dataset
     valid_pollutants = {
         name: year_df[col].mean()
         for col, name in pollutant_columns.items() if col in year_df.columns
     }
 
-    # Check if there are valid pollutants to plot
     if valid_pollutants:
-        # Create a bar chart for average pollutant levels
         fig = px.bar(x=list(valid_pollutants.keys()),
                      y=list(valid_pollutants.values()),
                      labels={
@@ -236,25 +231,18 @@ else:
 
 st.subheader("Stacked Area Chart of Pollutants Over Time")
 
-# Check if year_df is not empty
 if not year_df.empty:
-    # Define the pollutant columns to include in the stacked area chart
     pollutants = ['NO2 (ug/m3)', 'SO2 (ug/m3)', 'CO (mg/m3)', 'Ozone (ug/m3)']
 
-    # Filter out only the columns present in the dataset
     valid_pollutants = {
         col: year_df[col]
         for col in pollutants if col in year_df.columns
     }
-
-    # Check if there are valid pollutants to plot
     if valid_pollutants:
-        # Prepare DataFrame for Plotly
         stacked_area_df = year_df[['From Date'] +
                                   list(valid_pollutants.keys())].dropna()
         stacked_area_df = stacked_area_df.set_index('From Date')
 
-        # Create stacked area chart
         fig = px.area(stacked_area_df,
                       labels={
                           'value': 'Concentration',
@@ -271,38 +259,30 @@ st.subheader("Carbon Monoxide Levels and Predictions for 2024")
 
 # Forecasting
 if 'CO (mg/m3)' in year_df.columns and selected_year==2023:
-    # Prepare data
     time_series = year_df.set_index('From Date')['CO (mg/m3)'].dropna()
     data = year_df['CO (mg/m3)']
-    # Fit ARIMA model
+    
     model = ARIMA(time_series, order=(5,1,0))
     model_fit = model.fit()
 
-    # Forecast
-    forecast = model_fit.forecast(steps=30)  # Forecast next 30 days
+    forecast = model_fit.forecast(steps=30)  
 
-    # Add random noise
-    np.random.seed(0)  # For reproducibility
+    np.random.seed(0)  
     noise = np.random.normal(scale=0.1, size=forecast.shape)
     forecast_with_noise = forecast + noise
-
-    # Create date range for future dates
     last_date = time_series.index[-1]
-    today = pd.Timestamp.today().normalize()  # Normalize to remove time component
+    today = pd.Timestamp.today().normalize() 
     if today <= last_date:
-        today = last_date + pd.Timedelta(days=1)  # Start forecast from the next day if today is before or equal to last_date
-
+        today = last_date + pd.Timedelta(days=1) 
     future_dates = pd.date_range(start=today, periods=30)
 
-    # Create DataFrame for plotting forecast only
     forecast_df = pd.DataFrame({
         'Date': future_dates,
         'CO (mg/m3)': forecast_with_noise
     })
-
-    # Plot
+    
     fig = px.line(forecast_df, x='Date', y='CO (mg/m3)', title='Forecasted CO Levels', labels={'Date': 'Date', 'CO (mg/m3)': 'CO (mg/m3)'})
-    fig.update_traces(line=dict(dash='dash'), name='Forecasted CO Levels')  # Dashed line for forecasted data
+    fig.update_traces(line=dict(dash='dash'), name='Forecasted CO Levels')
 
     fig.update_layout(showlegend=True)
 
@@ -311,11 +291,130 @@ if 'CO (mg/m3)' in year_df.columns and selected_year==2023:
       model="gpt-4o-mini",
       messages=[
         {"role": "system", "content": "You are an experienced data analyst, and will use my existing data to come up with a health impact analysis based on the current Carbon Monoxid data."},
-        {"role": "user", "content": f"Give me a health impact analysis based on this data: {year_df}"}
+        {"role": "user", "content": f"I will be providing you with the data of pollutants in an Indian State over a single year. Your job is to find out, where these pollutants are coming from, what can be done to reduce them, and to generate a health impact analysis based on the data. The name of the state is {selected_name} This analysis will be targeted towards NGOs, and must include all the details mentioned above, Feel free to use the data here, but make sure you are NOT MENTIONING ANYTHING THAT IS NOT GIVEN IN THE DATAFRAME: {year_df}"}
       ]
     )
-    st.write("Health Impact Analysis")
+    st.subheader("Health Impact Analysis (AI Generated)")
     st.markdown(completion.choices[0].message.content)
 
 else:
     st.write("No valid data available for CO in this year.")
+
+def validate_email(email):
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    if re.match(pattern, email):
+        return True
+    return False
+
+st.subheader("Daily Air Quality Insights")
+
+email = st.text_input("Enter your email:", placeholder="john@doe.com")
+is_valid_email = validate_email(email)
+
+if email and not is_valid_email:
+    st.error("Please enter a valid email address.")
+if st.button("Submit", disabled=not is_valid_email):
+    st.success("Email validated! Ready to proceed.")
+
+    def generate_aqi_graph(aqi_data):
+        dates = [datetime.strptime(d['day'], '%Y-%m-%d').date() for d in aqi_data]
+        values = [d['avg'] for d in aqi_data]
+        plt.figure(figsize=(6, 4))
+        plt.plot(dates, values, marker='o', color='blue')
+        plt.gca().xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: datetime.fromordinal(int(x)).strftime('%d-%b')))
+        plt.title('AQI Trend Over the Past Week')
+        plt.xlabel('Date')
+        plt.ylabel('AQI Level')
+        plt.grid(False)
+        buffer = BytesIO()
+        plt.savefig(buffer, format='png')
+        plt.close()
+        buffer.seek(0)
+
+        return buffer.read()
+        
+    response = requests.get(f"https://api.waqi.info/feed/hyderabad/?token={AQICN_API_KEY}")
+    data = response.json()
+    aqi = data['data']['aqi']
+    city = data['data']['city']['name']
+    dominant_pollutant = data['data']['dominentpol']
+    forecast = data['data']['forecast']['daily']['pm25'] 
+    aqi_graph_image = generate_aqi_graph(forecast)
+    email_content = f"""
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset="UTF-8">
+        <style>
+          body {{
+            font-family: Arial, sans-serif;
+            color: #333;
+          }}
+          .header {{
+            text-align: center;
+            padding: 20px;
+          }}
+          .aqi-box {{
+            font-size: 24px;
+            font-weight: bold;
+            background-color: {'#00e400' if aqi <= 50 else '#ff0000'};
+            color: white;
+            padding: 10px;
+            text-align: center;
+            margin: 20px 0;
+          }}
+          .section {{
+            margin-bottom: 20px;
+          }}
+          .recommendation {{
+            font-weight: bold;
+            color: #ff0000;
+          }}
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>Air Quality Update for {city}</h1>
+          <p>Date: {datetime.now().strftime('%Y-%m-%d')}</p>
+        </div>
+        <div class="aqi-box">
+          Current AQI: {aqi}
+        </div>
+        <div class="section">
+          <h1>Dominant Pollutant: {dominant_pollutant.upper().replace('PM25', 'PM2.5')}</h1>
+          <p style="font-size: 16px;">The current dominant pollutant is <strong>{dominant_pollutant.upper().replace('PM25', 'PM2.5')}</strong>, which is affecting the air quality today.</p>
+        </div>
+        <div class="section">
+          <h1>AQI Trend</h1>
+          <p style="font-size: 16px;">Below is the AQI trend over the past week:</p>
+          <img src="cid:aqi_graph.png" alt="AQI Trend Graph" style="width: 100%;">
+        </div>
+        <div class="section">
+          <h1>Health Impact & Recommendations</h1>
+          <p style="font-size: 16px;" class="recommendation">For today, it's recommended to limit outdoor activities, especially for sensitive groups.</p>
+        </div>
+        <div class="section">
+          <h1>Weather Influence</h1>
+          <p style="font-size: 16px;" >Today's weather, with a temperature of {data['data']['iaqi']['t']['v']}°C, is likely to influence the air quality, potentially increasing pollution levels.</p>
+        </div>
+      </body>
+    </html>
+    """
+    mail = Mail(
+        sender=Address(email="ambientair@demomailtrap.com", name="Air Quality Monitor"),
+        to=[Address(email=email)],
+        subject=f"Air Quality Update for {city} on {datetime.now().strftime('%Y-%m-%d')}",
+        html=email_content,
+        attachments=[
+            Attachment(
+                content=base64.b64encode(aqi_graph_image), 
+                filename="aqi_graph.png",
+                disposition=Disposition.INLINE,
+                mimetype="image/png",
+                content_id="aqi_graph.png"
+            )
+        ]
+    )
+
+    client = MailtrapClient(token=MT_API_KEY)
+    client.send(mail)
