@@ -4,8 +4,8 @@ plotly
 statsmodels
 openai
 numpy
-base64
 matplotlib
+pybase64
 io
 mailtrap
 requests
