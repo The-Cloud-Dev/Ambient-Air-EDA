@@ -6,7 +6,6 @@ openai
 numpy
 matplotlib
 pybase64
-io
 mailtrap
 requests
 re
