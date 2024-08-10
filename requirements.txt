@@ -8,6 +8,4 @@ matplotlib
 pybase64
 mailtrap
 requests
-re
 json
-os
