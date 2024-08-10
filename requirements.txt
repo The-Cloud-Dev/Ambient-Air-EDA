@@ -4,3 +4,11 @@ plotly
 statsmodels
 openai
 numpy
+base64
+matplotlib
+io
+mailtrap
+requests
+re
+json
+os
